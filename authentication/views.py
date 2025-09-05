@@ -1,3 +1,4 @@
+from authentication.models import TrendifyUser
 from core.responses import TrendifyResponse
 
 from django.contrib.auth import authenticate
@@ -5,7 +6,7 @@ from django.contrib.auth import authenticate
 from rest_framework import status
 from rest_framework.views import APIView
 
-from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.tokens import RefreshToken, AccessToken
 
 
 class LoginAPIView(APIView):
@@ -50,6 +51,60 @@ class LoginAPIView(APIView):
                     'refresh_token': str(refresh_token),
                 },
                 message='Login successful!',
+                status_code=status.HTTP_200_OK,
+            )
+        except Exception as e:
+            return TrendifyResponse.error(
+                error=str(e),
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+
+class VerifyAccessTokenAPIView(APIView):
+    '''
+    APIView to verify if access token is valid/still not expired
+
+    Payload: {
+        'email': string,
+        'access_token': string
+    }
+
+    Response: bool
+    '''
+
+    def post(self, request):
+        try:
+            email = request.data.get('email')
+            access_token = request.data.get('access_token')
+
+            if (email is None or access_token is None):
+                return TrendifyResponse.error(
+                    error='Please provide both email and access token',
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                )
+            
+            user = TrendifyUser.objects.get(email=email)
+
+            if (user is None):
+                return TrendifyResponse.error(
+                    error='User not found',
+                    status_code=status.HTTP_404_NOT_FOUND,
+                )
+            
+            try:
+                AccessToken(access_token)
+                return TrendifyResponse.success(
+                    data=True,
+                    status_code=status.HTTP_200_OK,
+                )
+            except Exception as e:
+                return TrendifyResponse.success(
+                    data=False,
+                    status_code=status.HTTP_200_OK,
+                )
+
+            return TrendifyResponse.success(
+                data=True,
                 status_code=status.HTTP_200_OK,
             )
         except Exception as e:
