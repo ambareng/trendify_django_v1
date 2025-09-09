@@ -102,9 +102,44 @@ class VerifyAccessTokenAPIView(APIView):
                     data=False,
                     status_code=status.HTTP_200_OK,
                 )
+        except Exception as e:
+            return TrendifyResponse.error(
+                error=str(e),
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+
+class RefreshAccessTokenAPIView(APIView):
+    '''
+    APIView to refresh access token
+
+    Payload: {
+        'refresh_token': string
+    }
+
+    Response: {
+        'refresh_token': string,
+        'access_token': string
+    }
+    '''
+
+    def post(self, request):
+        refresh_token = request.data.get('refresh_token')
+
+        if not refresh_token:
+            return TrendifyResponse.error(
+                error='Please provide refresh_token',
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+        
+        try:
+            refresh = RefreshToken(refresh_token)
 
             return TrendifyResponse.success(
-                data=True,
+                data={
+                    'access_token': str(refresh.access_token),
+                    'refresh_token': str(refresh)
+                },
                 status_code=status.HTTP_200_OK,
             )
         except Exception as e:
