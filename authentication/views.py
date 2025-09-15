@@ -1,3 +1,5 @@
+from django.contrib.auth.password_validation import validate_password
+from django.forms import ValidationError
 from authentication.models import TrendifyUser
 from core.responses import TrendifyResponse
 
@@ -148,3 +150,65 @@ class RefreshAccessTokenAPIView(APIView):
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
+
+class RegisterAPIView(APIView):
+    '''
+    API Endpoint to register a new user
+    
+    Payload: {
+        'email': string,
+        'password': string,
+        'confirm_password': string
+    }
+
+    Response: bool
+    '''
+
+    def post(self, request):
+        try:
+            #  make request.data.get be serializer make sure if there is an error it still has same format as Trendify.error
+            email = request.data.get('email')
+            password = request.data.get('password')
+            confirm_password = request.data.get('confirm_password')
+
+            if (not email or not password or not confirm_password):
+                return TrendifyResponse.error(
+                    error='Please provide email, password and confirm password',
+                )
+            # make as well serializer and make password complex validation
+            if (password != confirm_password):
+                return TrendifyResponse.error(
+                    error='Password and confirm password do not match',
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                )
+            
+            if TrendifyUser.objects.filter(email=email).exists():
+                return TrendifyResponse.error(
+                    error='User already exists',
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                )
+            
+            try:
+                validate_password(password)
+            except ValidationError as e:
+                return TrendifyResponse.error(
+                    error=f'Invalid password: {e}',
+                )
+            
+            user = TrendifyUser.objects.create_user(
+                email=email,
+                username=email,
+                password=password,
+            )
+            user.save()
+
+            return TrendifyResponse.success(
+                data=True,
+                message='User registered successfully',
+                status_code=status.HTTP_201_CREATED,
+            )
+        except Exception as e:
+            return TrendifyResponse.error(
+                error=str(e),
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
