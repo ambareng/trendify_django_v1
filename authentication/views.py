@@ -1,6 +1,6 @@
 from django.contrib.auth.password_validation import validate_password
 from django.forms import ValidationError
-from authentication.models import TrendifyUser
+from authentication.models import PasswordResetOTP, TrendifyUser
 from core.responses import TrendifyResponse
 
 from django.contrib.auth import authenticate
@@ -212,3 +212,46 @@ class RegisterAPIView(APIView):
                 error=str(e),
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
+
+class ForgotPasswordAPIView(APIView):
+    '''
+    API Endpoint to send a reset password to a valid user email
+
+    Payload: {
+        email: string
+    }
+
+    Response: bool 
+    '''
+
+    def post(self, request):
+        try:
+            email = request.data.get('email')
+
+            if not email:
+                return TrendifyResponse.error(
+                    error='Please provide email',
+                )
+            
+            try:
+                user = TrendifyUser.objects.get(email=email)
+                otp = user.get_valid_password_reset_otp()
+
+                if not otp:
+                    otp = PasswordResetOTP.generate_otp(user)
+            except TrendifyUser.DoesNotExist:
+                return TrendifyResponse.error(
+                    error='Invalid email',
+                )
+            
+            return TrendifyResponse.success(
+                data=True,
+                message='Reset password email sent'
+            )
+        except Exception as e:
+            return TrendifyResponse.error(
+                error=str(e),
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
