@@ -244,9 +244,14 @@ class ForgotPasswordAPIView(APIView):
                 return TrendifyResponse.error(
                     error='Invalid email',
                 )
+
+            # TODO[ambareng] send actual email to user with otp here
+            # TODO[ambareng] maybe also throttle this API Endpoint?
             
             return TrendifyResponse.success(
-                data=True,
+                data={
+                    'expired_at': otp.expired_at,
+                },
                 message='Reset password email sent'
             )
         except Exception as e:
@@ -254,4 +259,122 @@ class ForgotPasswordAPIView(APIView):
                 error=str(e),
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
+
+class VerifyOTPAPIView(APIView):
+    '''
+    API Endpoint to verify if otp is valid and not yet expired
+
+    Payload: {
+        'email': string,
+        'otp': string
+    }
+
+    Response: bool
+    '''
+
+    def post(self, request):
+        try:
+            email = request.data.get('email')
+            otp = request.data.get('otp')
+
+            if not email or not otp:
+                return TrendifyResponse.error(
+                    error='Please provide email and otp'
+                )
+            
+            try:
+                user = TrendifyUser.objects.get(email=email)
+                user_otp = user.get_valid_password_reset_otp()
+
+                if not user_otp:
+                    return TrendifyResponse.error(
+                        error='Invalid otp',
+                    )
+            except TrendifyUser.DoesNotExist:
+                return TrendifyResponse.error(
+                    error='Invalid email',
+                )
+            
+            if user_otp.otp != otp:
+                return TrendifyResponse.error(
+                    error='Invalid otp',
+                )
+            
+            return TrendifyResponse.success(
+                data=True,
+                status_code=status.HTTP_200_OK,
+            )
+        except Exception as e:
+            return TrendifyResponse.error(
+                error=str(e),
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+
+class ChangePasswordAPIView(APIView):
+    '''
+    API Endpoint to change password
+
+    Payload: {
+        'email': string,
+        'otp': string,
+        'new_password': string,
+        'confirm_new_password': string,
+    }
+
+    Response: bool
+    '''
+
+    def post(self, request):
+        try:
+            email = request.data.get('email')
+            otp = request.data.get('otp')
+            new_password = request.data.get('new_password')
+            confirm_new_password = request.data.get('confirm_new_password')
+
+
+            if not email or not otp or not new_password or not confirm_new_password:
+                return TrendifyResponse.error(
+                    error='Please provide email, otp, new password and confirm new password',
+                )
+            
+            if new_password != confirm_new_password:
+                return TrendifyResponse.error(
+                    error='New password and confirm new password do not match',
+                )
+            
+            try:
+                user = TrendifyUser.objects.get(email=email)
+                user_otp = user.get_valid_password_reset_otp()
+
+                if not user_otp:
+                    return TrendifyResponse.error(
+                        error='Invalid otp',
+                    )
+                if user_otp.otp != otp:
+                    return TrendifyResponse.error(
+                        error='Invalid otp',
+                    )
+            except TrendifyUser.DoesNotExist:
+                return TrendifyResponse.error(
+                    error='Invalid email',
+                )
+            
+            user.set_password(new_password)
+            user.save()
+
+            user_otp.mark_as_used()
+            
+            return TrendifyResponse.success(
+                data=True,
+                message='Password changed successfully',
+                status_code=status.HTTP_200_OK,
+            )
+        except Exception as e:
+            return TrendifyResponse.error(
+                error=str(e),
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
 
