@@ -7,7 +7,7 @@ echo "Setting local Django environment variables..."
 echo "=================================================="
 
 export DEBUG='True'
-export ALLOWED_HOSTS='localhost,127.0.0.1'
+export ALLOWED_HOSTS='localhost,127.0.0.1,10.0.2.2'
 export SECRET_KEY='your-secret-key'
 export DB_NAME='trendify_local_db'
 export DB_USER='trendify_local_db_user'

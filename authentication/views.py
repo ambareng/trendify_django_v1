@@ -1,12 +1,15 @@
+from rest_framework_simplejwt.exceptions import TokenError
 from django.contrib.auth.password_validation import validate_password
-from django.forms import ValidationError
+from rest_framework.exceptions import NotFound, ValidationError
 from authentication.models import PasswordResetOTP, TrendifyUser
+from authentication.serializers import LoginSerializer, RefreshAccessTokenSerializer, RegisterSerializer, VerifyAccessTokenSerializer
 from core.responses import TrendifyResponse
 
 from django.contrib.auth import authenticate
 
 from rest_framework import status
 from rest_framework.views import APIView
+from rest_framework.permissions import IsAuthenticated
 
 from rest_framework_simplejwt.tokens import RefreshToken, AccessToken
 
@@ -22,44 +25,42 @@ class LoginAPIView(APIView):
 
     Response: {
         "access_token": "string",
-        "refresh_token": "string"
+        "refresh_token": "string",
+        "user": {
+            "user_id": int,
+            "email": string
+        }
     }
     '''
 
     def post(self, request):
-        try:
-            email = request.data.get('email')
-            password = request.data.get('password')
-
-            if not email or not password:
-                return TrendifyResponse.error(
-                    error='Please provide both email and password', 
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                )
-            
-            user = authenticate(username=email, password=password)
-
-            if not user:
-                return TrendifyResponse.error(
-                    error='Invalid credentials',
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                )
-            
-            refresh_token = RefreshToken.for_user(user)
-
-            return TrendifyResponse.success(
-                data={
-                    'access_token': str(refresh_token.access_token),
-                    'refresh_token': str(refresh_token),
-                },
-                message='Login successful!',
-                status_code=status.HTTP_200_OK,
-            )
-        except Exception as e:
+        serializer = LoginSerializer(data=request.data)
+        serializer.is_valid()
+        serializer.is_valid(raise_exception=True)
+        
+        user = authenticate(
+            username=serializer.validated_data['email'], 
+            password=serializer.validated_data['password'],
+        )
+        if not user:
             return TrendifyResponse.error(
-                error=str(e),
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                error='Invalid credentials',
+                status_code=status.HTTP_401_UNAUTHORIZED,
             )
+        
+        refresh_token = RefreshToken.for_user(user)
+        return TrendifyResponse.success(
+            data={
+                'access_token': str(refresh_token.access_token),
+                'refresh_token': str(refresh_token),
+                'user': {
+                    'id': user.id,
+                    'email': user.email,
+                }
+            },
+            message='Login successful!',
+            status_code=status.HTTP_200_OK,
+        )
 
 
 class VerifyAccessTokenAPIView(APIView):
@@ -73,41 +74,31 @@ class VerifyAccessTokenAPIView(APIView):
 
     Response: bool
     '''
+    permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        serializer = VerifyAccessTokenSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+    
+        email = serializer.validated_data['email']
+        auth_header = request.headers.get('Authorization')
+        access_token = auth_header.replace('Bearer', '', 1).strip()
+         
         try:
-            email = request.data.get('email')
-            access_token = request.data.get('access_token')
-
-            if (email is None or access_token is None):
-                return TrendifyResponse.error(
-                    error='Please provide both email and access token',
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                )
-            
-            user = TrendifyUser.objects.get(email=email)
-
-            if (user is None):
-                return TrendifyResponse.error(
-                    error='User not found',
-                    status_code=status.HTTP_404_NOT_FOUND,
-                )
-            
-            try:
-                AccessToken(access_token)
-                return TrendifyResponse.success(
-                    data=True,
-                    status_code=status.HTTP_200_OK,
-                )
-            except Exception as e:
-                return TrendifyResponse.success(
-                    data=False,
-                    status_code=status.HTTP_200_OK,
-                )
+            TrendifyUser.objects.get(email=email)
+        except TrendifyUser.DoesNotExist:
+            raise NotFound('User not found')
+        
+        try:
+            AccessToken(access_token)
+            return TrendifyResponse.success(
+                data=True,
+                status_code=status.HTTP_200_OK,
+            )
         except Exception as e:
-            return TrendifyResponse.error(
-                error=str(e),
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            return TrendifyResponse.success(
+                data=False,
+                status_code=status.HTTP_200_OK,
             )
 
 
@@ -126,13 +117,10 @@ class RefreshAccessTokenAPIView(APIView):
     '''
 
     def post(self, request):
-        refresh_token = request.data.get('refresh_token')
+        serializer = RefreshAccessTokenSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
 
-        if not refresh_token:
-            return TrendifyResponse.error(
-                error='Please provide refresh_token',
-                status_code=status.HTTP_400_BAD_REQUEST,
-            )
+        refresh_token = serializer.validated_data['refresh_token']
         
         try:
             refresh = RefreshToken(refresh_token)
@@ -144,11 +132,8 @@ class RefreshAccessTokenAPIView(APIView):
                 },
                 status_code=status.HTTP_200_OK,
             )
-        except Exception as e:
-            return TrendifyResponse.error(
-                error=str(e),
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
+        except TokenError as e:
+            raise ValidationError('Invalid token')
 
 
 class RegisterAPIView(APIView):
@@ -165,53 +150,24 @@ class RegisterAPIView(APIView):
     '''
 
     def post(self, request):
-        try:
-            #  make request.data.get be serializer make sure if there is an error it still has same format as Trendify.error
-            email = request.data.get('email')
-            password = request.data.get('password')
-            confirm_password = request.data.get('confirm_password')
+        serializer = RegisterSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
 
-            if (not email or not password or not confirm_password):
-                return TrendifyResponse.error(
-                    error='Please provide email, password and confirm password',
-                )
-            # make as well serializer and make password complex validation
-            if (password != confirm_password):
-                return TrendifyResponse.error(
-                    error='Password and confirm password do not match',
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                )
-            
-            if TrendifyUser.objects.filter(email=email).exists():
-                return TrendifyResponse.error(
-                    error='User already exists',
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                )
-            
-            try:
-                validate_password(password)
-            except ValidationError as e:
-                return TrendifyResponse.error(
-                    error=f'Invalid password: {e}',
-                )
-            
-            user = TrendifyUser.objects.create_user(
-                email=email,
-                username=email,
-                password=password,
-            )
-            user.save()
-
-            return TrendifyResponse.success(
-                data=True,
-                message='User registered successfully',
-                status_code=status.HTTP_201_CREATED,
-            )
-        except Exception as e:
-            return TrendifyResponse.error(
-                error=str(e),
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
+        email = serializer.validated_data['email']
+        password = serializer.validated_data['password']
+        
+        user = TrendifyUser.objects.create_user(
+            email=email,
+            username=email,
+            password=password,
+        )
+        user.save()
+        
+        return TrendifyResponse.success(
+            data=True,
+            message='User registered successfully',
+            status_code=status.HTTP_201_CREATED,
+        )
 
 
 class ForgotPasswordAPIView(APIView):
