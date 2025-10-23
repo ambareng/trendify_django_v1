@@ -2,7 +2,7 @@ from rest_framework_simplejwt.exceptions import TokenError
 from django.contrib.auth.password_validation import validate_password
 from rest_framework.exceptions import NotFound, ValidationError
 from authentication.models import PasswordResetOTP, TrendifyUser
-from authentication.serializers import LoginSerializer, RefreshAccessTokenSerializer, RegisterSerializer, VerifyAccessTokenSerializer
+from authentication.serializers import ChangePasswordSerializer, ForgotPasswordSerializer, LoginSerializer, RefreshAccessTokenSerializer, RegisterSerializer, ResendOTPSerializer, VerifyAccessTokenSerializer, VerifyOTPSerializer
 from core.responses import TrendifyResponse
 
 from django.contrib.auth import authenticate
@@ -43,10 +43,7 @@ class LoginAPIView(APIView):
             password=serializer.validated_data['password'],
         )
         if not user:
-            return TrendifyResponse.error(
-                error='Invalid credentials',
-                status_code=status.HTTP_401_UNAUTHORIZED,
-            )
+            raise ValidationError('Invalid credentials')
         
         refresh_token = RefreshToken.for_user(user)
         return TrendifyResponse.success(
@@ -182,39 +179,23 @@ class ForgotPasswordAPIView(APIView):
     '''
 
     def post(self, request):
-        try:
-            email = request.data.get('email')
+        serializer = ForgotPasswordSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
 
-            if not email:
-                return TrendifyResponse.error(
-                    error='Please provide email',
-                )
-            
-            try:
-                user = TrendifyUser.objects.get(email=email)
-                otp = user.get_valid_password_reset_otp()
+        email = serializer.validated_data['email']
+        
+        user = TrendifyUser.objects.get(email=email)
+        otp = PasswordResetOTP.generate_otp(user)
 
-                if not otp:
-                    otp = PasswordResetOTP.generate_otp(user)
-            except TrendifyUser.DoesNotExist:
-                return TrendifyResponse.error(
-                    error='Invalid email',
-                )
-
-            # TODO[ambareng] send actual email to user with otp here
-            # TODO[ambareng] maybe also throttle this API Endpoint?
-            
-            return TrendifyResponse.success(
-                data={
-                    'expired_at': otp.expired_at,
-                },
-                message='Reset password email sent'
-            )
-        except Exception as e:
-            return TrendifyResponse.error(
-                error=str(e),
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
+        # TODO[ambareng] send actual email to user with otp here
+        # TODO[ambareng] maybe also throttle this API Endpoint?
+        
+        return TrendifyResponse.success(
+            data={
+                'last_sent_at': otp.last_sent_at,
+            },
+            message='Reset password email sent'
+        )
 
 
 class VerifyOTPAPIView(APIView):
@@ -230,42 +211,13 @@ class VerifyOTPAPIView(APIView):
     '''
 
     def post(self, request):
-        try:
-            email = request.data.get('email')
-            otp = request.data.get('otp')
-
-            if not email or not otp:
-                return TrendifyResponse.error(
-                    error='Please provide email and otp'
-                )
-            
-            try:
-                user = TrendifyUser.objects.get(email=email)
-                user_otp = user.get_valid_password_reset_otp()
-
-                if not user_otp:
-                    return TrendifyResponse.error(
-                        error='Invalid otp',
-                    )
-            except TrendifyUser.DoesNotExist:
-                return TrendifyResponse.error(
-                    error='Invalid email',
-                )
-            
-            if user_otp.otp != otp:
-                return TrendifyResponse.error(
-                    error='Invalid otp',
-                )
-            
-            return TrendifyResponse.success(
-                data=True,
-                status_code=status.HTTP_200_OK,
-            )
-        except Exception as e:
-            return TrendifyResponse.error(
-                error=str(e),
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
+        serializer = VerifyOTPSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        return TrendifyResponse.success(
+            data=True,
+            status_code=status.HTTP_200_OK,
+        )
 
 
 class ChangePasswordAPIView(APIView):
@@ -283,54 +235,50 @@ class ChangePasswordAPIView(APIView):
     '''
 
     def post(self, request):
-        try:
-            email = request.data.get('email')
-            otp = request.data.get('otp')
-            new_password = request.data.get('new_password')
-            confirm_new_password = request.data.get('confirm_new_password')
+        serializer = ChangePasswordSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
 
+        email = serializer.validated_data['email']
+        new_password = serializer.validated_data['new_password']
 
-            if not email or not otp or not new_password or not confirm_new_password:
-                return TrendifyResponse.error(
-                    error='Please provide email, otp, new password and confirm new password',
-                )
-            
-            if new_password != confirm_new_password:
-                return TrendifyResponse.error(
-                    error='New password and confirm new password do not match',
-                )
-            
-            try:
-                user = TrendifyUser.objects.get(email=email)
-                user_otp = user.get_valid_password_reset_otp()
+        user = TrendifyUser.objects.get(email=email)
+        user_otp = user.get_valid_password_reset_otp()
+        
+        user.set_password(new_password)
+        user.save()
+        user_otp.mark_as_used()
+        
+        return TrendifyResponse.success(
+            data=True,
+            message='Password changed successfully',
+            status_code=status.HTTP_200_OK,
+        )
 
-                if not user_otp:
-                    return TrendifyResponse.error(
-                        error='Invalid otp',
-                    )
-                if user_otp.otp != otp:
-                    return TrendifyResponse.error(
-                        error='Invalid otp',
-                    )
-            except TrendifyUser.DoesNotExist:
-                return TrendifyResponse.error(
-                    error='Invalid email',
-                )
-            
-            user.set_password(new_password)
-            user.save()
+class ResendOTPAPIView(APIView):
+    '''
+    API Endpoint to resend OTP to user email
 
-            user_otp.mark_as_used()
-            
-            return TrendifyResponse.success(
-                data=True,
-                message='Password changed successfully',
-                status_code=status.HTTP_200_OK,
-            )
-        except Exception as e:
-            return TrendifyResponse.error(
-                error=str(e),
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
+    Payload: {
+        'email': string
+    }
 
+    Response: bool
+    '''
 
+    def post(self, request):
+        serializer = ResendOTPSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        email = serializer.validated_data['email']
+        user = TrendifyUser.objects.get(email=email)
+        user_otp = user.get_valid_password_reset_otp()
+        
+        # TODO[ambareng] send actual email to user with otp here
+        
+        return TrendifyResponse.success(
+            data={
+                'last_sent_at': user_otp.last_sent_at,
+            },
+            message='OTP resent successfully',
+            status_code=status.HTTP_200_OK,
+        )

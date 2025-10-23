@@ -1,6 +1,6 @@
 from django.urls import path
 
-from authentication.views import ChangePasswordAPIView, LoginAPIView, VerifyAccessTokenAPIView, RefreshAccessTokenAPIView, \
+from authentication.views import ChangePasswordAPIView, LoginAPIView, ResendOTPAPIView, VerifyAccessTokenAPIView, RefreshAccessTokenAPIView, \
     RegisterAPIView, ForgotPasswordAPIView, VerifyOTPAPIView
 
 urlpatterns = [
@@ -11,4 +11,5 @@ urlpatterns = [
     path('v1/forgot-password/', ForgotPasswordAPIView.as_view(), name='forgot-password-v1'),
     path('v1/verify-otp/', VerifyOTPAPIView.as_view(), name='verify-otp-v1'),
     path('v1/change-password/', ChangePasswordAPIView.as_view(), name='change-password-v1'),
+    path('v1/resend-otp/', ResendOTPAPIView.as_view(), name='resend-otp-v1'),
 ]

@@ -38,6 +38,7 @@ class PasswordResetOTP(models.Model):
     otp = models.CharField(max_length=6, editable=False)
     created_at = models.DateTimeField(auto_now_add=True, editable=False)
     expired_at = models.DateTimeField(editable=False)
+    last_sent_at = models.DateTimeField(auto_now_add=True)
     is_used = models.BooleanField(default=False)
     # maybe make a field here that will store if already expired?
 
@@ -51,6 +52,11 @@ class PasswordResetOTP(models.Model):
     # why use class method and what is cls used for?
     @classmethod
     def generate_otp(cls, user):
+        # expire already existing otp if any
+        existing_otp = user.get_valid_password_reset_otp()
+        if existing_otp:
+            existing_otp.mark_as_used()
+
         # why use secrets and string instead of random?
         otp = ''.join(secrets.choice(string.digits) for _ in range(6))
         # should we not auto set expired at 5 minutes from created_at if possible
@@ -69,6 +75,21 @@ class PasswordResetOTP(models.Model):
     
     def mark_as_used(self):
         self.is_used = True
+        self.save()
+    
+    def can_resend(self, min_interval_seconds=60):
+        """
+        Check if enough time has passed since last send
+        Default: 1 minute (60 seconds)
+        """
+        time_since_last_send = timezone.now() - self.last_sent_at
+        return time_since_last_send.total_seconds() >= min_interval_seconds
+    
+    def update_last_sent_at(self):
+        """
+        Update the last_sent_at timestamp to now
+        """
+        self.last_sent_at = timezone.now()
         self.save()
 
     def __str__(self):
